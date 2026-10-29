@@ -64,6 +64,7 @@ h2{font-size:20px}
 <button onclick="cadastrarCliente()">Salvar cliente</button>
 <p id="msgCliente" class="mensagem"></p>
 <h2>Meus clientes</h2>
+<input id="buscaCliente" type="search" placeholder="Buscar por nome ou telefone" oninput="filtrarClientes()">
 <div id="listaClientes">Carregando...</div>
 </section>
 
@@ -303,7 +304,40 @@ async function cadastrarCliente() {
   msg('msgCliente','Cliente cadastrado com sucesso!');
   await carregarClientes();
 }
+function filtrarClientes() {
+  const campo = document.getElementById('buscaCliente');
+  const busca = campo.value.trim().toLocaleLowerCase('pt-BR');
 
+  const el = document.getElementById('listaClientes');
+  el.replaceChildren();
+
+  const encontrados = clientes.filter(c =>
+    String(c.name || '').toLocaleLowerCase('pt-BR').includes(busca) ||
+    String(c.phone || '').toLocaleLowerCase('pt-BR').includes(busca)
+  );
+
+  if (!encontrados.length) {
+    el.textContent = 'Nenhum cliente encontrado.';
+    return;
+  }
+
+  encontrados.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'item';
+
+    const nome = document.createElement('strong');
+    nome.textContent = c.name;
+
+    const telefone = document.createElement('div');
+    telefone.textContent = c.phone || 'Sem telefone';
+
+    const obs = document.createElement('small');
+    obs.textContent = c.notes || '';
+
+    item.append(nome, telefone, obs);
+    el.appendChild(item);
+  });
+}
 async function carregarClientes() {
   const el = document.getElementById('listaClientes');
   el.textContent = 'Carregando clientes...';
