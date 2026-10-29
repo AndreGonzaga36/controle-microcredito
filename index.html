@@ -458,6 +458,23 @@ async function carregarParcelas() {
     const status=document.createElement('div');
     status.textContent=restante<=0?'Paga':(pago>0?'Parcialmente paga':'Pendente')+' | Falta: '+reais(restante);
     item.append(strong,detalhe,status);
+    pagamentos
+  .filter(x => String(x.installment_id) === String(p.id))
+  .forEach(pagamento => {
+    const info = document.createElement('div');
+    const forma = pagamento.method === 'cash'
+      ? 'Dinheiro'
+      : pagamento.method === 'pix' ? 'Pix' : pagamento.method;
+
+    info.textContent = 'Pagamento: ' + reais(pagamento.amount) +
+      ' | Forma: ' + forma;
+
+    const editar = document.createElement('button');
+    editar.textContent = 'Editar pagamento';
+    editar.onclick = () => editarPagamento(pagamento);
+
+    item.append(info, editar);
+  });
     if(restante>0){
       const valor=document.createElement('input');
       valor.type='number'; valor.min='0.01'; valor.step='0.01';
@@ -501,7 +518,59 @@ async function registrarPagamento(parcela,campo,metodo,restante,botao) {
   }
   await carregarParcelas();
 }
+async function editarPagamento(pagamento) {
+  const valorAtual = Number(pagamento.amount);
+  const valorTexto = prompt('Novo valor do pagamento:', valorAtual.toFixed(2).replace('.', ','));
+  if (valorTexto === null) return;
 
+  const valor = Number(valorTexto.trim().replace(',', '.'));
+  if (!Number.isFinite(valor) || valor <= 0) {
+    alert('Informe um valor válido.');
+    return;
+  }
+
+  const metodoAtual = pagamento.method === 'cash' ? 'dinheiro' : pagamento.method;
+  const metodoTexto = prompt('Forma de pagamento: dinheiro ou pix', metodoAtual);
+  if (metodoTexto === null) return;
+
+  const metodo = metodoTexto.trim().toLowerCase();
+  if (!['dinheiro', 'pix'].includes(metodo)) {
+    alert('Escolha dinheiro ou pix.');
+    return;
+  }
+
+  const parcela = parcelas.find(p => String(p.id) === String(pagamento.installment_id));
+  if (!parcela) {
+    alert('Parcela não encontrada.');
+    return;
+  }
+
+  const outrosPagamentos = pagamentos
+    .filter(p => String(p.installment_id) === String(parcela.id)
+      && String(p.id) !== String(pagamento.id))
+    .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+  if (outrosPagamentos + valor > Number(parcela.amount) + 0.001) {
+    alert('O valor corrigido ultrapassa o total da parcela.');
+    return;
+  }
+
+  const { error } = await db.from('payments')
+    .update({
+      amount: Math.round(valor * 100) / 100,
+      method: metodo === 'dinheiro' ? 'cash' : 'pix'
+    })
+    .eq('id', pagamento.id)
+    .eq('user_id', usuario.id);
+
+  if (error) {
+    alert('Erro ao corrigir pagamento: ' + error.message);
+    return;
+  }
+
+  alert('Pagamento corrigido!');
+  await carregarParcelas();
+}
 async function carregarTudo() {
   await carregarClientes();
   await carregarEmprestimos();
