@@ -305,8 +305,9 @@ async function cadastrarCliente() {
   await carregarClientes();
 }
 function filtrarClientes() {
-  const campo = document.getElementById('buscaCliente');
-  const busca = campo.value.trim().toLocaleLowerCase('pt-BR');
+  const busca = document.getElementById('buscaCliente').value
+    .trim()
+    .toLocaleLowerCase('pt-BR');
 
   const el = document.getElementById('listaClientes');
   el.replaceChildren();
@@ -492,7 +493,11 @@ async function carregarParcelas() {
     const status=document.createElement('div');
     status.textContent=restante<=0?'Paga':(pago>0?'Parcialmente paga':'Pendente')+' | Falta: '+reais(restante);
     item.append(strong,detalhe,status);
-    pagamentos
+const cobrar = document.createElement('button');
+cobrar.textContent = 'Cobrar pelo WhatsApp';
+cobrar.onclick = () => cobrarWhatsApp(p);
+item.appendChild(cobrar);
+pagamentos
   .filter(x => String(x.installment_id) === String(p.id))
   .forEach(pagamento => {
     const info = document.createElement('div');
@@ -507,12 +512,16 @@ async function carregarParcelas() {
     editar.textContent = 'Editar pagamento';
     editar.onclick = () => editarPagamento(pagamento);
 
-  const excluir = document.createElement('button');
+   const excluir = document.createElement('button');
 excluir.textContent = 'Excluir pagamento';
 excluir.onclick = () => excluirPagamento(pagamento);
 
+
 item.append(info, editar, excluir);
+
+  
   });
+
     if(restante>0){
       const valor=document.createElement('input');
       valor.type='number'; valor.min='0.01'; valor.step='0.01';
@@ -556,6 +565,7 @@ async function registrarPagamento(parcela,campo,metodo,restante,botao) {
   }
   await carregarParcelas();
 }
+
 async function editarPagamento(pagamento) {
   const valorAtual = Number(pagamento.amount);
   const valorTexto = prompt('Novo valor do pagamento:', valorAtual.toFixed(2).replace('.', ','));
@@ -657,6 +667,74 @@ async function excluirPagamento(pagamento) {
   alert('Pagamento excluído.');
   await carregarParcelas();
 }
+
+
+function cobrarWhatsApp(parcela) {
+  const emprestimo = emprestimos.find(
+    e => String(e.id) === String(parcela.loan_id)
+  );
+
+  if (!emprestimo) {
+    alert('Empréstimo não encontrado.');
+    return;
+  }
+
+  const cliente = clientes.find(
+    c => String(c.id) === String(emprestimo.client_id)
+  );
+
+  if (!cliente) {
+    alert('Cliente não encontrado.');
+    return;
+  }
+
+  let telefone = String(cliente.phone || '').replace(/\D/g, '');
+
+  if (telefone.length === 10 || telefone.length === 11) {
+    telefone = '55' + telefone;
+  }
+
+  if (telefone.length < 12 || telefone.length > 13) {
+    alert('Confira o telefone do cliente e inclua o DDD.');
+    return;
+  }
+
+  const totalPago = pagamentos
+    .filter(p => String(p.installment_id) === String(parcela.id))
+    .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+  const saldo = Math.max(
+    0,
+    Number(parcela.amount) - totalPago
+  );
+
+  if (saldo <= 0) {
+    alert('Esta parcela já está paga.');
+    return;
+  }
+
+  const vencimento = parcela.due_date
+    ? parcela.due_date.split('-').reverse().join('/')
+    : 'não informado';
+
+  const mensagem =
+    `Olá, ${cliente.name}! Tudo bem? ` +
+    `Passando para lembrar da parcela ${parcela.installment_number} ` +
+    `do seu microcrédito. Saldo pendente: ` +
+    `${saldo.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    })}. Vencimento: ${vencimento}. ` +
+    'Se já pagou, por favor desconsidere. Obrigado!';
+
+  window.open(
+    'https://wa.me/' + telefone + '?text=' +
+    encodeURIComponent(mensagem),
+    '_blank'
+  );
+}
+
+
 async function carregarTudo() {
   await carregarClientes();
   await carregarEmprestimos();
