@@ -1,0 +1,534 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controle Microcrédito</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#f3f6f8;margin:0;color:#172b4d}
+header{background:#075e54;color:white;padding:20px}
+main{max-width:760px;margin:20px auto;padding:12px}
+.card{background:white;padding:18px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 10px #0001}
+input,select,button{width:100%;padding:12px;margin-top:9px;border:1px solid #ccd5df;border-radius:8px;font-size:16px}
+button{background:#087f5b;color:white;border:0;font-weight:bold;cursor:pointer}
+.secundario{background:#526579}
+.item{padding:13px 0;border-bottom:1px solid #ddd;overflow-wrap:anywhere}
+.oculto{display:none}
+.mensagem{white-space:pre-wrap;overflow-wrap:anywhere}
+nav{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:15px}
+nav button{width:auto;flex:1;min-width:100px}
+small{color:#526579}
+h1{font-size:25px}
+h2{font-size:20px}
+</style>
+</head>
+<body>
+<header>
+<h1>Controle Microcrédito</h1>
+<p>Clientes, empréstimos e recebimentos</p>
+</header>
+<main>
+
+<section class="card" id="login">
+<h2>Entrar na sua conta</h2>
+<input id="email" type="email" placeholder="Seu e-mail" autocomplete="username">
+<input id="senha" type="password" placeholder="Sua senha" autocomplete="current-password">
+<button onclick="entrar()">Entrar</button>
+<p id="mensagemLogin" class="mensagem"></p>
+</section>
+
+<div id="app" class="oculto">
+<section class="card">
+<strong>Configurações</strong>
+<label for="taxaPadrao">Taxa padrão de juros (% ao mês)</label>
+<input id="taxaPadrao" type="number" min="0" max="1000" step="0.01" value="5">
+<button onclick="salvarTaxa()">Salvar taxa padrão</button>
+<p id="msgTaxa" class="mensagem"></p>
+<button class="secundario" onclick="sair()">Sair da conta</button>
+</section>
+
+<nav>
+<button onclick="aba('clientes')">Clientes</button>
+<button onclick="aba('emprestimos')">Empréstimos</button>
+<button onclick="aba('parcelas')">Parcelas e pagamentos</button>
+</nav>
+
+<section class="card" id="telaClientes">
+<h2>Cadastrar cliente</h2>
+<input id="nome" placeholder="Nome completo">
+<input id="telefone" type="tel" placeholder="Telefone / WhatsApp">
+<input id="observacoes" placeholder="Observações (opcional)">
+<button onclick="cadastrarCliente()">Salvar cliente</button>
+<p id="msgCliente" class="mensagem"></p>
+<h2>Meus clientes</h2>
+<div id="listaClientes">Carregando...</div>
+</section>
+
+<section class="card oculto" id="telaEmprestimos">
+<h2>Novo empréstimo</h2>
+<label for="clienteEmprestimo">Cliente</label>
+<select id="clienteEmprestimo">
+<option value="">Carregando clientes...</option>
+</select>
+
+<label for="valor">Valor emprestado (R$)</label>
+<input id="valor" type="number" min="0.01" step="0.01" placeholder="Ex.: 1000">
+
+<label for="tipoCalculo">Como calcular o total?</label>
+<select id="tipoCalculo" onchange="atualizarCalculo()">
+<option value="juros">Calcular pelos juros</option>
+<option value="total">Informar diretamente o total a receber</option>
+</select>
+
+<div id="campoJuros">
+<label for="taxaEmprestimo">Juros mensais (%)</label>
+<input id="taxaEmprestimo" type="number" min="0" max="1000" step="0.01">
+</div>
+
+<div id="campoTotal" class="oculto">
+<label for="totalInformado">Total a receber (R$)</label>
+<input id="totalInformado" type="number" min="0.01" step="0.01" placeholder="Ex.: 1200">
+</div>
+
+<label for="quantidade">Quantidade de parcelas</label>
+<input id="quantidade" type="number" min="1" max="1000" step="1" placeholder="Ex.: 12">
+
+<label for="frequencia">Frequência de pagamento</label>
+<select id="frequencia">
+<option value="daily">Diária</option>
+<option value="weekly">Semanal</option>
+<option value="monthly">Mensal</option>
+</select>
+
+<label for="inicio">Data de início dos pagamentos</label>
+<input id="inicio" type="date">
+
+<p id="previa" class="mensagem">Preencha os dados para calcular o total.</p>
+<button onclick="cadastrarEmprestimo()">Cadastrar empréstimo e gerar parcelas</button>
+<p id="msgEmprestimo" class="mensagem"></p>
+
+<h2>Empréstimos cadastrados</h2>
+<div id="listaEmprestimos">Carregando...</div>
+</section>
+
+<section class="card oculto" id="telaParcelas">
+<h2>Parcelas em aberto e pagamentos</h2>
+<p><small>O saldo considera os pagamentos registrados neste aplicativo.</small></p>
+<div id="resumo"></div>
+<div id="listaParcelas">Carregando...</div>
+</section>
+</div>
+</main>
+
+<script>
+const SUPABASE_URL = 'https://ptvjikmrjbobfwfutjmw.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Q0gRK91CoGncVovalmOBpA_nPQiIphg';
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+let usuario = null;
+let clientes = [];
+let emprestimos = [];
+let parcelas = [];
+let pagamentos = [];
+
+function msg(id, texto) {
+  document.getElementById(id).textContent = texto;
+}
+
+function reais(n) {
+  return Number(n || 0).toLocaleString('pt-BR', {
+    style:'currency', currency:'BRL'
+  });
+}
+
+function dataLocal(d) {
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth()+1).padStart(2,'0');
+  const dia = String(d.getDate()).padStart(2,'0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function mostrarData(s) {
+  if (!s) return '—';
+  const p = s.slice(0,10).split('-');
+  return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
+function somarMeses(data, meses) {
+  const d = new Date(data + 'T12:00:00');
+  const diaOriginal = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + meses);
+  const ultimoDia = new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+  d.setDate(Math.min(diaOriginal,ultimoDia));
+  return dataLocal(d);
+}
+
+function vencimento(inicio, frequencia, numero) {
+  if (frequencia === 'daily') {
+    const d = new Date(inicio + 'T12:00:00');
+    d.setDate(d.getDate()+numero);
+    return dataLocal(d);
+  }
+  if (frequencia === 'weekly') {
+    const d = new Date(inicio + 'T12:00:00');
+    d.setDate(d.getDate()+7*numero);
+    return dataLocal(d);
+  }
+  return somarMeses(inicio, numero);
+}
+
+function nomeFrequencia(f) {
+  return ({daily:'Diária',weekly:'Semanal',monthly:'Mensal'})[f] || f;
+}
+
+function taxaAtual() {
+  return Number(document.getElementById('taxaEmprestimo').value || 0);
+}
+
+function calcular() {
+  const valor = Number(document.getElementById('valor').value);
+  const qtd = Number(document.getElementById('quantidade').value);
+  const tipo = document.getElementById('tipoCalculo').value;
+  const freq = document.getElementById('frequencia').value;
+  const taxa = taxaAtual();
+  let total = 0;
+  if (!(valor > 0) || !(qtd >= 1) || !Number.isInteger(qtd)) {
+    msg('previa','Informe um valor e uma quantidade válida de parcelas.');
+    return null;
+  }
+  if (tipo === 'total') {
+    total = Number(document.getElementById('totalInformado').value);
+    if (!(total > 0)) {
+      msg('previa','Informe o total que será recebido.');
+      return null;
+    }
+    if (total < valor) {
+      msg('previa','O total a receber não pode ser menor que o valor emprestado.');
+      return null;
+    }
+  } else {
+    // Prazo aproximado: 30 diárias, 4 semanais ou 1 mensal por mês.
+    let meses;
+    if (freq === 'daily') meses = qtd / 30;
+    else if (freq === 'weekly') meses = qtd / 4;
+    else meses = qtd;
+    total = valor * (1 + (taxa / 100) * meses);
+  }
+  total = Math.round((total + Number.EPSILON)*100)/100;
+  const parcela = Math.floor((total/qtd)*100)/100;
+  msg('previa',
+    'Total a receber: ' + reais(total) +
+    '\nValor emprestado: ' + reais(valor) +
+    '\nJuros totais: ' + reais(total-valor) +
+    '\nQuantidade: ' + qtd +
+    '\nValor aproximado por parcela: ' + reais(parcela) +
+    '\nFrequência: ' + nomeFrequencia(freq));
+  return {valor,qtd,tipo,freq,taxa,total};
+}
+
+function atualizarCalculo() {
+  const tipo = document.getElementById('tipoCalculo').value;
+  document.getElementById('campoJuros').classList.toggle('oculto',tipo !== 'juros');
+  document.getElementById('campoTotal').classList.toggle('oculto',tipo !== 'total');
+  calcular();
+}
+
+['valor','quantidade','frequencia','taxaEmprestimo','totalInformado'].forEach(id => {
+  document.getElementById(id).addEventListener('input',calcular);
+  document.getElementById(id).addEventListener('change',calcular);
+});
+
+function salvarTaxa() {
+  const taxa = Number(document.getElementById('taxaPadrao').value);
+  if (!Number.isFinite(taxa) || taxa < 0 || taxa > 1000) {
+    msg('msgTaxa','Informe uma taxa entre 0 e 1000%.');
+    return;
+  }
+  localStorage.setItem('microcredito_taxa_padrao',String(taxa));
+  document.getElementById('taxaEmprestimo').value = taxa;
+  msg('msgTaxa','Taxa padrão salva neste navegador.');
+  calcular();
+}
+
+function carregarTaxa() {
+  const taxa = localStorage.getItem('microcredito_taxa_padrao') || '5';
+  document.getElementById('taxaPadrao').value = taxa;
+  document.getElementById('taxaEmprestimo').value = taxa;
+}
+
+async function entrar() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('senha').value;
+  msg('mensagemLogin','Verificando acesso...');
+  const {data,error} = await db.auth.signInWithPassword({email,password});
+  if (error) {
+    msg('mensagemLogin','Não foi possível entrar: '+error.message);
+    return;
+  }
+  usuario = data.user;
+  await mostrarApp();
+}
+
+async function mostrarApp() {
+  document.getElementById('login').classList.add('oculto');
+  document.getElementById('app').classList.remove('oculto');
+  await carregarTudo();
+}
+
+function aba(nome) {
+  document.getElementById('telaClientes').classList.toggle('oculto',nome!=='clientes');
+  document.getElementById('telaEmprestimos').classList.toggle('oculto',nome!=='emprestimos');
+  document.getElementById('telaParcelas').classList.toggle('oculto',nome!=='parcelas');
+  if (nome==='parcelas') carregarParcelas();
+  if (nome==='emprestimos') carregarEmprestimos();
+}
+
+async function cadastrarCliente() {
+  const name = document.getElementById('nome').value.trim();
+  const phone = document.getElementById('telefone').value.trim();
+  const notes = document.getElementById('observacoes').value.trim();
+  if (!name) return msg('msgCliente','Digite o nome do cliente.');
+  const {data,error:authError} = await db.auth.getUser();
+  if (authError || !data.user) return msg('msgCliente','Sessão expirada. Entre novamente.');
+  msg('msgCliente','Salvando cliente...');
+  const {error} = await db.from('clients').insert({
+    user_id:data.user.id, name, phone:phone||null, notes:notes||null
+  });
+  if (error) return msg('msgCliente','Erro ao salvar cliente: '+error.message);
+  ['nome','telefone','observacoes'].forEach(id=>document.getElementById(id).value='');
+  msg('msgCliente','Cliente cadastrado com sucesso!');
+  await carregarClientes();
+}
+
+async function carregarClientes() {
+  const el = document.getElementById('listaClientes');
+  el.textContent = 'Carregando clientes...';
+  const {data,error} = await db.from('clients')
+    .select('id,name,phone,notes,created_at')
+    .order('created_at',{ascending:false});
+  if (error) { el.textContent='Erro ao carregar clientes: '+error.message; return; }
+  clientes = data || [];
+  el.replaceChildren();
+  const select = document.getElementById('clienteEmprestimo');
+  select.replaceChildren();
+  const opt = document.createElement('option');
+  opt.value=''; opt.textContent='Selecione o cliente';
+  select.appendChild(opt);
+  clientes.forEach(c=>{
+    const o=document.createElement('option');
+    o.value=c.id; o.textContent=c.name;
+    select.appendChild(o);
+    const item=document.createElement('div');
+    item.className='item';
+    const strong=document.createElement('strong');
+    strong.textContent=c.name;
+    const tel=document.createElement('div');
+    tel.textContent=c.phone||'Sem telefone';
+    const obs=document.createElement('small');
+    obs.textContent=c.notes||'';
+    item.append(strong,tel,obs);
+    el.appendChild(item);
+  });
+  if (!clientes.length) el.textContent='Nenhum cliente cadastrado.';
+}
+
+async function cadastrarEmprestimo() {
+  const calc = calcular();
+  if (!calc) return;
+  const clientId = document.getElementById('clienteEmprestimo').value;
+  const inicio = document.getElementById('inicio').value;
+  if (!clientId) return msg('msgEmprestimo','Selecione um cliente.');
+  if (!inicio) return msg('msgEmprestimo','Informe a data de início dos pagamentos.');
+  if (calc.qtd > 1000) return msg('msgEmprestimo','Use no máximo 1000 parcelas.');
+  if (!usuario) return msg('msgEmprestimo','Entre novamente na sua conta.');
+
+  const botao = document.querySelector('#telaEmprestimos button[onclick="cadastrarEmprestimo()"]');
+  botao.disabled = true;
+  botao.textContent = 'Salvando empréstimo...';
+  msg('msgEmprestimo','Registrando empréstimo...');
+
+  try {
+    const loanRow = {
+      user_id:usuario.id,
+      client_id:clientId,
+      amount:calc.valor,
+      installments_count:calc.qtd,
+      frequency:calc.freq,
+      interest_rate:calc.tipo==='juros'?calc.taxa:0,
+      total_amount:calc.total,
+      calculation_type:calc.tipo,
+      start_date:inicio
+    };
+
+    const {data:loan,error:loanError} = await db.from('loans')
+      .insert(loanRow).select('id').single();
+
+    if (loanError) throw new Error('Empréstimo: '+loanError.message);
+
+    const base = Math.floor((calc.total/calc.qtd)*100)/100;
+    let acumulado = 0;
+    const linhas = [];
+    for (let n=1;n<=calc.qtd;n++) {
+      const valorParcela = n===calc.qtd
+        ? Math.round((calc.total-acumulado)*100)/100
+        : base;
+      acumulado = Math.round((acumulado+valorParcela)*100)/100;
+      linhas.push({
+        user_id:usuario.id,
+        loan_id:loan.id,
+        installment_number:n,
+        due_date:vencimento(inicio,calc.freq,n),
+        amount:valorParcela,
+        status:'pending'
+      });
+    }
+
+    const {error:instError} = await db.from('installments').insert(linhas);
+    if (instError) {
+      msg('msgEmprestimo','O empréstimo foi salvo, mas as parcelas não foram criadas.\nErro: '+instError.message+'\nNão cadastre o mesmo empréstimo novamente. Avise-me para corrigirmos.');
+      return;
+    }
+
+    msg('msgEmprestimo','Empréstimo e '+calc.qtd+' parcelas cadastrados com sucesso!');
+    document.getElementById('valor').value='';
+    document.getElementById('quantidade').value='';
+    document.getElementById('totalInformado').value='';
+    await carregarEmprestimos();
+    await carregarParcelas();
+  } catch(e) {
+    msg('msgEmprestimo','Não foi possível concluir: '+e.message);
+  } finally {
+    botao.disabled=false;
+    botao.textContent='Cadastrar empréstimo e gerar parcelas';
+  }
+}
+
+async function carregarEmprestimos() {
+  const el=document.getElementById('listaEmprestimos');
+  el.textContent='Carregando empréstimos...';
+  const {data,error}=await db.from('loans')
+    .select('id,client_id,amount,installments_count,frequency,interest_rate,total_amount,calculation_type,start_date,created_at')
+    .order('created_at',{ascending:false});
+  if(error){el.textContent='Erro ao carregar empréstimos: '+error.message;return;}
+  emprestimos=data||[];
+  el.replaceChildren();
+  if(!emprestimos.length){el.textContent='Nenhum empréstimo cadastrado.';return;}
+  emprestimos.forEach(l=>{
+    const c=clientes.find(x=>String(x.id)===String(l.client_id));
+    const item=document.createElement('div'); item.className='item';
+    const t=document.createElement('strong'); t.textContent=c?c.name:'Cliente';
+    const detalhe=document.createElement('div');
+    detalhe.textContent='Emprestado: '+reais(l.amount)+' | Total: '+reais(l.total_amount)+' | '+l.installments_count+' parcelas '+nomeFrequencia(l.frequency);
+    const data=document.createElement('small'); data.textContent='Início: '+mostrarData(l.start_date);
+    item.append(t,detalhe,data); el.appendChild(item);
+  });
+}
+
+async function carregarParcelas() {
+  const el=document.getElementById('listaParcelas');
+  el.textContent='Carregando parcelas...';
+  const [{data:ins,error:e1},{data:pags,error:e2}] = await Promise.all([
+    db.from('installments').select('id,user_id,loan_id,installment_number,due_date,amount,status').order('due_date',{ascending:true}),
+    db.from('payments').select('id,installment_id,amount,method,paid_at')
+  ]);
+  if(e1||e2){el.textContent='Erro ao carregar: '+(e1||e2).message;return;}
+  parcelas=ins||[]; pagamentos=pags||[];
+  const totalReceber=parcelas.reduce((s,p)=>s+Number(p.amount||0),0);
+  const totalPago=pagamentos.reduce((s,p)=>s+Number(p.amount||0),0);
+  const saldo=Math.max(0,totalReceber-totalPago);
+  document.getElementById('resumo').textContent=
+    'Parcelas: '+parcelas.length+' | Valor das parcelas: '+reais(totalReceber)+
+    ' | Pagamentos registrados: '+reais(totalPago)+' | Saldo estimado: '+reais(saldo);
+  el.replaceChildren();
+  if(!parcelas.length){el.textContent='Nenhuma parcela cadastrada ainda.';return;}
+  parcelas.forEach(p=>{
+    const pago=pagamentos.filter(x=>String(x.installment_id)===String(p.id))
+      .reduce((s,x)=>s+Number(x.amount||0),0);
+    const restante=Math.max(0,Math.round((Number(p.amount)-pago)*100)/100);
+    const c=clientes.find(x=>emprestimos.some(l=>String(l.id)===String(p.loan_id)&&String(l.client_id)===String(x.id)));
+    const item=document.createElement('div'); item.className='item';
+    const strong=document.createElement('strong');
+    strong.textContent=(c?c.name:'Cliente')+' — Parcela '+p.installment_number;
+    const detalhe=document.createElement('div');
+    detalhe.textContent='Vencimento: '+mostrarData(p.due_date)+' | Parcela: '+reais(p.amount);
+    const status=document.createElement('div');
+    status.textContent=restante<=0?'Paga':(pago>0?'Parcialmente paga':'Pendente')+' | Falta: '+reais(restante);
+    item.append(strong,detalhe,status);
+    if(restante>0){
+      const valor=document.createElement('input');
+      valor.type='number'; valor.min='0.01'; valor.step='0.01';
+      valor.max=restante.toFixed(2); valor.placeholder='Valor recebido (máx. '+reais(restante)+')';
+      const metodo=document.createElement('select');
+      [['dinheiro','Dinheiro'],['pix','Pix'],['transferencia','Transferência'],['outro','Outro']].forEach(([v,t])=>{
+        const o=document.createElement('option');o.value=v;o.textContent=t;metodo.appendChild(o);
+      });
+      const botao=document.createElement('button');botao.textContent='Registrar pagamento';
+      botao.onclick=()=>registrarPagamento(p,valor,metodo,restante,botao);
+      item.append(valor,metodo,botao);
+    }
+    el.appendChild(item);
+  });
+}
+
+async function registrarPagamento(parcela,campo,metodo,restante,botao) {
+  const valor=Number(campo.value);
+  if(!(valor>0)) return alert('Informe um valor válido.');
+  if(valor>restante+0.001) return alert('O pagamento não pode superar o saldo restante.');
+  botao.disabled=true;
+  const {error}=await db.from('payments').insert({
+    user_id:usuario.id,
+    installment_id:parcela.id,
+    amount:Math.round(valor*100)/100,
+    method:metodo.value.toLowerCase() === 'dinheiro' ? 'cash' : metodo.value.toLowerCase(),
+    paid_at:new Date().toISOString()
+  });
+  if(error){
+    alert('Erro ao registrar pagamento: '+error.message);
+    botao.disabled=false;
+    return;
+  }
+  const pagamentosDaParcela=pagamentos
+    .filter(x=>String(x.installment_id)===String(parcela.id))
+    .reduce((s,x)=>s+Number(x.amount||0),0)+valor;
+  if(pagamentosDaParcela>=Number(parcela.amount)-0.001){
+    const {error:statusError}=await db.from('installments')
+      .update({status:'paid'}).eq('id',parcela.id);
+    if(statusError) alert('Pagamento salvo, mas não foi possível atualizar o status: '+statusError.message);
+  }
+  await carregarParcelas();
+}
+
+async function carregarTudo() {
+  await carregarClientes();
+  await carregarEmprestimos();
+  await carregarParcelas();
+}
+
+async function sair() {
+  await db.auth.signOut();
+  usuario=null;
+  document.getElementById('app').classList.add('oculto');
+  document.getElementById('login').classList.remove('oculto');
+  document.getElementById('senha').value='';
+  msg('mensagemLogin','Você saiu da conta.');
+}
+
+async function iniciar() {
+  carregarTaxa();
+  document.getElementById('inicio').value=dataLocal(new Date());
+  const {data,error}=await db.auth.getSession();
+  if(error){msg('mensagemLogin','Erro de sessão: '+error.message);return;}
+  if(data.session){
+    usuario=data.session.user;
+    await mostrarApp();
+  }
+}
+
+iniciar();
+</script>
+</body>
+</html>
